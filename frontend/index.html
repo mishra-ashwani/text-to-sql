@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Text to SQL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .sql-keyword { color: #818cf8; font-weight: bold; }
+        .sql-string  { color: #34d399; }
+        .sql-number  { color: #fbbf24; }
+        .sql-comment { color: #6b7280; font-style: italic; }
+    </style>
+</head>
+<body class="h-full bg-gray-900 text-gray-100 font-sans">
+
+<!-- Top Nav -->
+<nav class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
+    <h1 class="text-xl font-bold text-indigo-400">Text → SQL</h1>
+    <div class="flex gap-3">
+        <button onclick="togglePanel('savedSchemas')" class="text-sm px-3 py-1 rounded bg-gray-700 hover:bg-gray-600">Saved Schemas</button>
+        <button onclick="togglePanel('queryHistory')" class="text-sm px-3 py-1 rounded bg-gray-700 hover:bg-gray-600">History</button>
+    </div>
+</nav>
+
+<div class="flex flex-col lg:flex-row h-[calc(100vh-52px)]">
+
+    <!-- Sidebar -->
+    <div id="sidebar" class="hidden lg:hidden w-full lg:w-80 bg-gray-850 border-r border-gray-700 overflow-y-auto p-4 bg-gray-800">
+        <div id="savedSchemasPanel" class="hidden">
+            <h2 class="text-lg font-semibold mb-3">Saved Schemas</h2>
+            <div id="savedSchemasList" class="space-y-2"></div>
+        </div>
+        <div id="queryHistoryPanel" class="hidden">
+            <h2 class="text-lg font-semibold mb-3">Query History</h2>
+            <div id="historyList" class="space-y-2"></div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-1 overflow-y-auto p-4 lg:p-6 space-y-6">
+
+        <!-- Schema Builder -->
+        <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold">Schema Builder</h2>
+                <div class="flex gap-2 items-center">
+                    <select id="dialectSelect" class="bg-gray-700 text-sm rounded px-2 py-1 border border-gray-600">
+                        <option value="postgresql">PostgreSQL</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="sqlite">SQLite</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Paste DDL Toggle -->
+            <div class="mb-4">
+                <button onclick="toggleDDLInput()" class="text-sm text-indigo-400 hover:text-indigo-300 underline">Paste DDL instead</button>
+                <div id="ddlInputArea" class="hidden mt-2">
+                    <textarea id="ddlTextarea" rows="8" class="w-full bg-gray-900 border border-gray-600 rounded p-3 font-mono text-sm" placeholder="Paste your CREATE TABLE statements here..."></textarea>
+                    <button onclick="parseDDL()" class="mt-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-sm">Parse DDL</button>
+                </div>
+            </div>
+
+            <!-- Tables Container -->
+            <div id="tablesContainer" class="space-y-4"></div>
+
+            <button onclick="addTable()" class="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-sm font-medium">+ Add Table</button>
+
+            <!-- Save Schema -->
+            <div class="mt-4 flex gap-2">
+                <input id="schemaNameInput" type="text" placeholder="Schema name" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm flex-1" />
+                <button onclick="saveSchema()" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 rounded text-sm font-medium">Save Schema</button>
+            </div>
+        </div>
+
+        <!-- Query Input -->
+        <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
+            <h2 class="text-lg font-semibold mb-3">Natural Language Requirement</h2>
+            <textarea id="requirementInput" rows="3" class="w-full bg-gray-900 border border-gray-600 rounded p-3 text-sm" placeholder="Show all users who placed more than 3 orders in the last month"></textarea>
+            <button id="generateBtn" onclick="generateSQL()" class="mt-3 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded font-medium flex items-center gap-2">
+                <span>Generate SQL</span>
+                <svg id="spinner" class="hidden animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+            </button>
+        </div>
+
+        <!-- Result -->
+        <div id="resultPanel" class="hidden bg-gray-800 rounded-lg p-5 border border-gray-700">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-semibold">Generated SQL</h2>
+                <div class="flex items-center gap-3">
+                    <span id="validBadge" class="hidden px-2 py-0.5 rounded text-xs font-medium bg-green-600">Valid</span>
+                    <span id="invalidBadge" class="hidden px-2 py-0.5 rounded text-xs font-medium bg-red-600">Invalid</span>
+                    <button onclick="copySQL()" class="text-sm px-3 py-1 rounded bg-gray-700 hover:bg-gray-600">Copy</button>
+                </div>
+            </div>
+            <pre id="sqlOutput" class="bg-gray-900 rounded p-4 font-mono text-sm overflow-x-auto whitespace-pre-wrap"></pre>
+            <div id="validationErrors" class="hidden mt-3 text-sm text-red-400"></div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+const API = '';
+let tables = [];
+
+// --- Schema Builder ---
+function addTable(name = '', columns = []) {
+    const id = Date.now();
+    tables.push({ id, name: name, columns: columns.length ? columns : [] });
+    if (!columns.length) addColumn(id);
+    renderTables();
+}
+
+function removeTable(id) {
+    tables = tables.filter(t => t.id !== id);
+    renderTables();
+}
+
+function addColumn(tableId, col = null) {
+    const table = tables.find(t => t.id === tableId);
+    if (!table) return;
+    table.columns.push(col || { name: '', data_type: 'INT', is_primary_key: false, is_nullable: true, foreign_key: '' });
+    renderTables();
+}
+
+function removeColumn(tableId, colIdx) {
+    const table = tables.find(t => t.id === tableId);
+    if (!table) return;
+    table.columns.splice(colIdx, 1);
+    renderTables();
+}
+
+function renderTables() {
+    const container = document.getElementById('tablesContainer');
+    container.innerHTML = tables.map(table => `
+        <div class="border border-gray-600 rounded p-3">
+            <div class="flex items-center gap-2 mb-2">
+                <input type="text" value="${esc(table.name)}" onchange="tables.find(t=>t.id===${table.id}).name=this.value"
+                    placeholder="Table name" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm flex-1 font-medium" />
+                <button onclick="removeTable(${table.id})" class="text-red-400 hover:text-red-300 text-sm">Remove</button>
+            </div>
+            <div class="space-y-1">
+                ${table.columns.map((col, ci) => `
+                    <div class="flex items-center gap-1 text-xs">
+                        <input type="text" value="${esc(col.name)}" onchange="tables.find(t=>t.id===${table.id}).columns[${ci}].name=this.value"
+                            placeholder="column" class="bg-gray-700 border border-gray-600 rounded px-1.5 py-1 w-28" />
+                        <select onchange="tables.find(t=>t.id===${table.id}).columns[${ci}].data_type=this.value"
+                            class="bg-gray-700 border border-gray-600 rounded px-1 py-1 w-32">
+                            ${['INT','BIGINT','VARCHAR(255)','VARCHAR(100)','TEXT','BOOLEAN','DECIMAL(10,2)','TIMESTAMP','DATE'].map(dt =>
+                                `<option value="${dt}" ${col.data_type===dt?'selected':''}>${dt}</option>`
+                            ).join('')}
+                        </select>
+                        <label class="flex items-center gap-0.5"><input type="checkbox" ${col.is_primary_key?'checked':''} onchange="tables.find(t=>t.id===${table.id}).columns[${ci}].is_primary_key=this.checked"> PK</label>
+                        <label class="flex items-center gap-0.5"><input type="checkbox" ${col.is_nullable?'checked':''} onchange="tables.find(t=>t.id===${table.id}).columns[${ci}].is_nullable=this.checked"> Null</label>
+                        <input type="text" value="${esc(col.foreign_key||'')}" onchange="tables.find(t=>t.id===${table.id}).columns[${ci}].foreign_key=this.value||null"
+                            placeholder="FK (e.g. users.id)" class="bg-gray-700 border border-gray-600 rounded px-1.5 py-1 w-28" />
+                        <button onclick="removeColumn(${table.id},${ci})" class="text-red-400 hover:text-red-300">✕</button>
+                    </div>
+                `).join('')}
+            </div>
+            <button onclick="addColumn(${table.id})" class="mt-2 text-xs text-indigo-400 hover:text-indigo-300">+ Add Column</button>
+        </div>
+    `).join('');
+}
+
+function esc(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+function getSchemaInput() {
+    return {
+        tables: tables.map(t => ({
+            table_name: t.name,
+            columns: t.columns.map(c => ({
+                name: c.name,
+                data_type: c.data_type,
+                is_primary_key: c.is_primary_key,
+                is_nullable: c.is_nullable,
+                default_value: null,
+                foreign_key: c.foreign_key || null
+            }))
+        })),
+        sql_dialect: document.getElementById('dialectSelect').value
+    };
+}
+
+// --- DDL Parsing ---
+function toggleDDLInput() {
+    document.getElementById('ddlInputArea').classList.toggle('hidden');
+}
+
+function parseDDL() {
+    const ddl = document.getElementById('ddlTextarea').value;
+    const tableRegex = /CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\);/gi;
+    let match;
+    tables = [];
+    while ((match = tableRegex.exec(ddl)) !== null) {
+        const tableName = match[1];
+        const body = match[2];
+        const cols = [];
+        const lines = body.split(',').map(l => l.trim()).filter(l => l && !l.match(/^\s*(?:PRIMARY|UNIQUE|INDEX|KEY|CONSTRAINT)/i));
+        for (const line of lines) {
+            const parts = line.match(/^(\w+)\s+(\w+(?:\([^)]*\))?)/);
+            if (!parts) continue;
+            const fkMatch = line.match(/REFERENCES\s+(\w+)\((\w+)\)/i);
+            cols.push({
+                name: parts[1],
+                data_type: parts[2].toUpperCase(),
+                is_primary_key: /PRIMARY\s+KEY/i.test(line),
+                is_nullable: !/NOT\s+NULL/i.test(line),
+                foreign_key: fkMatch ? `${fkMatch[1]}.${fkMatch[2]}` : null
+            });
+        }
+        const id = Date.now() + Math.random();
+        tables.push({ id, name: tableName, columns: cols });
+    }
+    renderTables();
+    document.getElementById('ddlInputArea').classList.add('hidden');
+}
+
+// --- Generate SQL ---
+async function generateSQL() {
+    const requirement = document.getElementById('requirementInput').value.trim();
+    if (!requirement) return alert('Please enter a requirement.');
+    if (!tables.length || !tables[0].name) return alert('Please define at least one table.');
+
+    const btn = document.getElementById('generateBtn');
+    const spinner = document.getElementById('spinner');
+    btn.disabled = true;
+    spinner.classList.remove('hidden');
+
+    try {
+        const res = await fetch(`${API}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                schema_input: getSchemaInput(),
+                requirement
+            })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Generation failed');
+        }
+        const data = await res.json();
+        showResult(data);
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        btn.disabled = false;
+        spinner.classList.add('hidden');
+    }
+}
+
+function showResult(data) {
+    const panel = document.getElementById('resultPanel');
+    panel.classList.remove('hidden');
+    document.getElementById('sqlOutput').innerHTML = highlightSQL(data.formatted_query);
+    document.getElementById('validBadge').classList.toggle('hidden', !data.is_valid);
+    document.getElementById('invalidBadge').classList.toggle('hidden', data.is_valid);
+    const errDiv = document.getElementById('validationErrors');
+    if (data.validation_errors && data.validation_errors.length) {
+        errDiv.classList.remove('hidden');
+        errDiv.innerHTML = data.validation_errors.map(e => `<div>• ${esc(e)}</div>`).join('');
+    } else {
+        errDiv.classList.add('hidden');
+    }
+}
+
+function highlightSQL(sql) {
+    const keywords = ['SELECT','FROM','WHERE','JOIN','LEFT','RIGHT','INNER','OUTER','ON','AND','OR','NOT','IN','AS','ORDER','BY','GROUP','HAVING','LIMIT','OFFSET','INSERT','UPDATE','DELETE','CREATE','ALTER','DROP','TABLE','INTO','VALUES','SET','BETWEEN','LIKE','IS','NULL','COUNT','SUM','AVG','MAX','MIN','DISTINCT','UNION','ALL','EXISTS','CASE','WHEN','THEN','ELSE','END','ASC','DESC','WITH','OVER','PARTITION','COALESCE','CAST','EXTRACT'];
+    let escaped = sql.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    escaped = escaped.replace(/'([^']*)'/g, `<span class="sql-string">'$1'</span>`);
+    escaped = escaped.replace(/\b(\d+)\b/g, `<span class="sql-number">$1</span>`);
+    for (const kw of keywords) {
+        escaped = escaped.replace(new RegExp(`\\b(${kw})\\b`, 'g'), `<span class="sql-keyword">$1</span>`);
+    }
+    return escaped;
+}
+
+function copySQL() {
+    const text = document.getElementById('sqlOutput').innerText;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1500);
+    });
+}
+
+// --- Save / Load Schema ---
+async function saveSchema() {
+    const name = document.getElementById('schemaNameInput').value.trim();
+    if (!name) return alert('Enter a schema name.');
+    if (!tables.length) return alert('Add at least one table.');
+    await fetch(`${API}/api/schemas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, schema_input: getSchemaInput() })
+    });
+    document.getElementById('schemaNameInput').value = '';
+    alert('Schema saved!');
+}
+
+async function loadSavedSchemas() {
+    const res = await fetch(`${API}/api/schemas`);
+    const data = await res.json();
+    const list = document.getElementById('savedSchemasList');
+    if (!data.length) { list.innerHTML = '<p class="text-gray-400 text-sm">No saved schemas</p>'; return; }
+    list.innerHTML = data.map(s => `
+        <div class="bg-gray-700 rounded p-2 flex justify-between items-center">
+            <button onclick='loadSchema(${JSON.stringify(JSON.stringify(s.schema_input))})' class="text-sm text-indigo-300 hover:text-indigo-200">${esc(s.name)}</button>
+            <button onclick="deleteSchema(${s.id})" class="text-red-400 hover:text-red-300 text-xs">Delete</button>
+        </div>
+    `).join('');
+}
+
+function loadSchema(jsonStr) {
+    const schema = JSON.parse(jsonStr);
+    tables = schema.tables.map(t => ({
+        id: Date.now() + Math.random(),
+        name: t.table_name,
+        columns: t.columns
+    }));
+    if (schema.sql_dialect) document.getElementById('dialectSelect').value = schema.sql_dialect;
+    renderTables();
+    togglePanel('savedSchemas');
+}
+
+async function deleteSchema(id) {
+    await fetch(`${API}/api/schemas/${id}`, { method: 'DELETE' });
+    loadSavedSchemas();
+}
+
+// --- History ---
+async function loadHistory() {
+    const res = await fetch(`${API}/api/history`);
+    const data = await res.json();
+    const list = document.getElementById('historyList');
+    if (!data.length) { list.innerHTML = '<p class="text-gray-400 text-sm">No history yet</p>'; return; }
+    list.innerHTML = data.map(h => `
+        <div class="bg-gray-700 rounded p-2">
+            <p class="text-sm text-gray-300 mb-1">${esc(h.requirement)}</p>
+            <pre class="text-xs text-gray-400 font-mono overflow-x-auto">${esc(h.generated_sql)}</pre>
+            <button onclick="deleteHistory(${h.id})" class="text-red-400 hover:text-red-300 text-xs mt-1">Delete</button>
+        </div>
+    `).join('');
+}
+
+async function deleteHistory(id) {
+    await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
+    loadHistory();
+}
+
+// --- Sidebar ---
+function togglePanel(panel) {
+    const sidebar = document.getElementById('sidebar');
+    const schemas = document.getElementById('savedSchemasPanel');
+    const history = document.getElementById('queryHistoryPanel');
+
+    if (panel === 'savedSchemas') {
+        const isVisible = !schemas.classList.contains('hidden');
+        schemas.classList.toggle('hidden');
+        history.classList.add('hidden');
+        sidebar.classList.toggle('hidden', isVisible);
+        if (!isVisible) loadSavedSchemas();
+    } else {
+        const isVisible = !history.classList.contains('hidden');
+        history.classList.toggle('hidden');
+        schemas.classList.add('hidden');
+        sidebar.classList.toggle('hidden', isVisible);
+        if (!isVisible) loadHistory();
+    }
+}
+
+// --- Init ---
+addTable();
+</script>
+</body>
+</html>
