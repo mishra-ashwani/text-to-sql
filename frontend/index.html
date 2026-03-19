@@ -95,15 +95,38 @@
                 </div>
             </div>
             <pre id="sqlOutput" class="bg-gray-900 rounded p-4 font-mono text-sm overflow-x-auto whitespace-pre-wrap"></pre>
-            <div id="validationErrors" class="hidden mt-3 text-sm text-red-400"></div>
+            <div id="explanationPanel" class="hidden mt-3 text-sm text-gray-300 bg-gray-900 rounded p-3">
+            <span class="font-medium text-indigo-400">Explanation:</span> <span id="explanationText"></span>
+        </div>
+        <div id="validationErrors" class="hidden mt-3 text-sm text-red-400"></div>
         </div>
 
     </div>
 </div>
 
+<!-- Toast -->
+<div id="toast" class="fixed bottom-4 right-4 px-4 py-2 rounded shadow-lg text-sm transition-all duration-300 translate-y-20 opacity-0 pointer-events-none z-50"></div>
+
 <script>
 const API = '';
 let tables = [];
+let _savedSchemasCache = [];
+
+// --- Toast Notifications ---
+function showToast(message, type = 'info') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = 'fixed bottom-4 right-4 px-4 py-2 rounded shadow-lg text-sm transition-all duration-300 z-50 '
+        + (type === 'error' ? 'bg-red-600 text-white' : type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-700 text-white');
+    toast.style.transform = 'translateY(0)';
+    toast.style.opacity = '1';
+    toast.style.pointerEvents = 'auto';
+    setTimeout(() => {
+        toast.style.transform = 'translateY(20px)';
+        toast.style.opacity = '0';
+        toast.style.pointerEvents = 'none';
+    }, 3000);
+}
 
 // --- Schema Builder ---
 function addTable(name = '', columns = []) {
@@ -156,7 +179,7 @@ function renderTables() {
                         <label class="flex items-center gap-0.5"><input type="checkbox" ${col.is_nullable?'checked':''} onchange="tables.find(t=>t.id===${table.id}).columns[${ci}].is_nullable=this.checked"> Null</label>
                         <input type="text" value="${esc(col.foreign_key||'')}" onchange="tables.find(t=>t.id===${table.id}).columns[${ci}].foreign_key=this.value||null"
                             placeholder="FK (e.g. users.id)" class="bg-gray-700 border border-gray-600 rounded px-1.5 py-1 w-28" />
-                        <button onclick="removeColumn(${table.id},${ci})" class="text-red-400 hover:text-red-300">✕</button>
+                        <button onclick="removeColumn(${table.id},${ci})" class="text-red-400 hover:text-red-300">&#10005;</button>
                     </div>
                 `).join('')}
             </div>
@@ -165,7 +188,7 @@ function renderTables() {
     `).join('');
 }
 
-function esc(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g, '&quot;').replace(/'/g,'&#39;').replace(/</g, '&lt;').replace(/>/g,'&gt;'); }
 
 function getSchemaInput() {
     return {
@@ -214,6 +237,11 @@ function parseDDL() {
         const id = Date.now() + Math.random();
         tables.push({ id, name: tableName, columns: cols });
     }
+    if (tables.length) {
+        showToast(`Parsed ${tables.length} table(s)`, 'success');
+    } else {
+        showToast('No valid CREATE TABLE statements found', 'error');
+    }
     renderTables();
     document.getElementById('ddlInputArea').classList.add('hidden');
 }
@@ -221,8 +249,8 @@ function parseDDL() {
 // --- Generate SQL ---
 async function generateSQL() {
     const requirement = document.getElementById('requirementInput').value.trim();
-    if (!requirement) return alert('Please enter a requirement.');
-    if (!tables.length || !tables[0].name) return alert('Please define at least one table.');
+    if (!requirement) return showToast('Please enter a requirement.', 'error');
+    if (!tables.length || !tables[0].name) return showToast('Please define at least one table.', 'error');
 
     const btn = document.getElementById('generateBtn');
     const spinner = document.getElementById('spinner');
@@ -239,13 +267,13 @@ async function generateSQL() {
             })
         });
         if (!res.ok) {
-            const err = await res.json();
+            const err = await res.json().catch(() => ({ detail: 'Generation failed' }));
             throw new Error(err.detail || 'Generation failed');
         }
         const data = await res.json();
         showResult(data);
     } catch (e) {
-        alert(e.message);
+        showToast(e.message, 'error');
     } finally {
         btn.disabled = false;
         spinner.classList.add('hidden');
@@ -258,10 +286,19 @@ function showResult(data) {
     document.getElementById('sqlOutput').innerHTML = highlightSQL(data.formatted_query);
     document.getElementById('validBadge').classList.toggle('hidden', !data.is_valid);
     document.getElementById('invalidBadge').classList.toggle('hidden', data.is_valid);
+
+    const explPanel = document.getElementById('explanationPanel');
+    if (data.explanation) {
+        explPanel.classList.remove('hidden');
+        document.getElementById('explanationText').textContent = data.explanation;
+    } else {
+        explPanel.classList.add('hidden');
+    }
+
     const errDiv = document.getElementById('validationErrors');
     if (data.validation_errors && data.validation_errors.length) {
         errDiv.classList.remove('hidden');
-        errDiv.innerHTML = data.validation_errors.map(e => `<div>• ${esc(e)}</div>`).join('');
+        errDiv.innerHTML = data.validation_errors.map(e => `<div>&bull; ${esc(e)}</div>`).join('');
     } else {
         errDiv.classList.add('hidden');
     }
@@ -280,42 +317,40 @@ function highlightSQL(sql) {
 
 function copySQL() {
     const text = document.getElementById('sqlOutput').innerText;
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = event.target;
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = 'Copy', 1500);
-    });
+    navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard!', 'success'));
 }
 
 // --- Save / Load Schema ---
 async function saveSchema() {
     const name = document.getElementById('schemaNameInput').value.trim();
-    if (!name) return alert('Enter a schema name.');
-    if (!tables.length) return alert('Add at least one table.');
+    if (!name) return showToast('Enter a schema name.', 'error');
+    if (!tables.length) return showToast('Add at least one table.', 'error');
     await fetch(`${API}/api/schemas`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, schema_input: getSchemaInput() })
     });
     document.getElementById('schemaNameInput').value = '';
-    alert('Schema saved!');
+    showToast('Schema saved!', 'success');
 }
 
 async function loadSavedSchemas() {
     const res = await fetch(`${API}/api/schemas`);
     const data = await res.json();
+    _savedSchemasCache = data;
     const list = document.getElementById('savedSchemasList');
     if (!data.length) { list.innerHTML = '<p class="text-gray-400 text-sm">No saved schemas</p>'; return; }
-    list.innerHTML = data.map(s => `
+    list.innerHTML = data.map((s, i) => `
         <div class="bg-gray-700 rounded p-2 flex justify-between items-center">
-            <button onclick='loadSchema(${JSON.stringify(JSON.stringify(s.schema_input))})' class="text-sm text-indigo-300 hover:text-indigo-200">${esc(s.name)}</button>
+            <button onclick="loadSchemaByIndex(${i})" class="text-sm text-indigo-300 hover:text-indigo-200">${esc(s.name)}</button>
             <button onclick="deleteSchema(${s.id})" class="text-red-400 hover:text-red-300 text-xs">Delete</button>
         </div>
     `).join('');
 }
 
-function loadSchema(jsonStr) {
-    const schema = JSON.parse(jsonStr);
+function loadSchemaByIndex(index) {
+    const schema = _savedSchemasCache[index]?.schema_input;
+    if (!schema) return;
     tables = schema.tables.map(t => ({
         id: Date.now() + Math.random(),
         name: t.table_name,
@@ -324,6 +359,7 @@ function loadSchema(jsonStr) {
     if (schema.sql_dialect) document.getElementById('dialectSelect').value = schema.sql_dialect;
     renderTables();
     togglePanel('savedSchemas');
+    showToast('Schema loaded', 'success');
 }
 
 async function deleteSchema(id) {

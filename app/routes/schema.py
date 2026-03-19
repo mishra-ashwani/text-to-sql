@@ -1,4 +1,4 @@
-import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.db import get_session
 from app.database.models import SavedSchemaModel
 from app.models.schemas import SavedSchema, SchemaInput
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -22,6 +24,7 @@ async def save_schema(
     session.add(db_schema)
     await session.commit()
     await session.refresh(db_schema)
+    logger.info("Schema saved: %s (id=%s)", saved_schema.name, db_schema.id)
     return SavedSchema(
         id=db_schema.id,
         name=db_schema.name,
@@ -73,4 +76,5 @@ async def delete_schema(schema_id: int, session: AsyncSession = Depends(get_sess
         raise HTTPException(status_code=404, detail="Schema not found")
     await session.delete(row)
     await session.commit()
+    logger.info("Schema deleted: id=%s", schema_id)
     return {"detail": "Schema deleted"}

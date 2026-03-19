@@ -4,7 +4,7 @@ SYSTEM_PROMPT_TEMPLATE = """You are an expert SQL query generator. You ONLY gene
 
 Rules:
 1. ONLY use tables and columns defined in the provided schema. Never invent tables or columns.
-2. Return ONLY the SQL query — no explanations, no markdown code blocks.
+2. Return the SQL query first, then on a new line write "-- Explanation:" followed by a brief explanation.
 3. Use proper JOIN syntax when multiple tables are involved.
 4. Use aliases for readability when joining tables.
 5. If the requirement is ambiguous, make reasonable assumptions and note them.

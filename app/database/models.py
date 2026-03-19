@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, Text
 
@@ -11,7 +11,7 @@ class SavedSchemaModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(Text, nullable=False)
     schema_json = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class QueryHistoryModel(Base):
@@ -22,4 +22,4 @@ class QueryHistoryModel(Base):
     generated_sql = Column(Text, nullable=False)
     schema_name = Column(Text, nullable=True)
     is_valid = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
