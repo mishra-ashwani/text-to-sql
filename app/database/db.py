@@ -9,6 +9,8 @@ Base = declarative_base()
 
 
 async def init_db():
+    from app.database.models import QueryHistoryModel, SavedSchemaModel  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

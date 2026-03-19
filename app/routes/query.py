@@ -36,18 +36,18 @@ def _split_sql_and_explanation(raw: str) -> tuple[str, str | None]:
 @router.post("/generate", response_model=QueryResponse)
 @limiter.limit(settings.rate_limit)
 async def generate_sql(
-    request: QueryRequest,
-    req: Request,
+    request: Request,
+    body: QueryRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    if not request.schema_input.tables:
+    if not body.schema_input.tables:
         raise HTTPException(status_code=400, detail="At least one table is required")
-    if not request.requirement.strip():
+    if not body.requirement.strip():
         raise HTTPException(status_code=400, detail="Requirement cannot be empty")
 
-    dialect = request.schema_input.sql_dialect or "postgresql"
+    dialect = body.schema_input.sql_dialect or "postgresql"
     system_prompt, user_prompt = build_prompts(
-        request.schema_input, request.requirement
+        body.schema_input, body.requirement
     )
 
     try:
@@ -64,12 +64,12 @@ async def generate_sql(
     sql, explanation = _split_sql_and_explanation(raw_sql)
     formatted = format_sql(sql)
     is_valid, errors = validate_sql(sql, dialect)
-    warnings = check_schema_references(sql, request.schema_input)
+    warnings = check_schema_references(sql, body.schema_input)
     all_errors = errors + warnings
 
     try:
         history = QueryHistoryModel(
-            requirement=request.requirement,
+            requirement=body.requirement,
             generated_sql=formatted,
             is_valid=is_valid,
         )
@@ -79,7 +79,7 @@ async def generate_sql(
         logger.exception("Failed to save query to history")
 
     logger.info(
-        "Generated SQL for requirement: %.80s (valid=%s)", request.requirement, is_valid
+        "Generated SQL for requirement: %.80s (valid=%s)", body.requirement, is_valid
     )
 
     return QueryResponse(

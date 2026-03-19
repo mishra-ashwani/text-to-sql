@@ -26,7 +26,7 @@
 <div class="flex flex-col lg:flex-row h-[calc(100vh-52px)]">
 
     <!-- Sidebar -->
-    <div id="sidebar" class="hidden lg:hidden w-full lg:w-80 bg-gray-850 border-r border-gray-700 overflow-y-auto p-4 bg-gray-800">
+    <div id="sidebar" class="hidden w-full lg:w-80 border-r border-gray-700 overflow-y-auto p-4 bg-gray-800 shrink-0">
         <div id="savedSchemasPanel" class="hidden">
             <h2 class="text-lg font-semibold mb-3">Saved Schemas</h2>
             <div id="savedSchemasList" class="space-y-2"></div>
@@ -332,6 +332,12 @@ async function saveSchema() {
     });
     document.getElementById('schemaNameInput').value = '';
     showToast('Schema saved!', 'success');
+    // Refresh sidebar if open, or open it
+    const sidebar = document.getElementById('sidebar');
+    const schemasPanel = document.getElementById('savedSchemasPanel');
+    if (!schemasPanel.classList.contains('hidden')) {
+        loadSavedSchemas();
+    }
 }
 
 async function loadSavedSchemas() {
